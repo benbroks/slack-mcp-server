@@ -332,6 +332,42 @@ npm run build
 npm run watch
 ```
 
+## Python Notebook for Account Recommendations
+
+This repository includes a Jupyter notebook (`refresh_account_recommendations.ipynb`) for refreshing account recommendation Slack messages on delivery states.
+
+### Setup
+
+Install the required Python dependencies:
+
+```bash
+pip install -r requirements-notebook.txt
+```
+
+### Usage
+
+The notebook provides functions to:
+- Refresh Slack messages for arbitrary sets of delivery states
+- Post new messages or update existing ones
+- Format delivery state information as rich Slack messages
+- Save and load message mappings for future updates
+
+Start Jupyter:
+
+```bash
+jupyter notebook refresh_account_recommendations.ipynb
+```
+
+### Key Features
+
+- **Flexible Input**: Accepts arbitrary delivery state data structures
+- **Rich Formatting**: Creates visually appealing Slack messages with blocks
+- **Update or Create**: Can update existing messages or post new ones
+- **Message Tracking**: Maintains mapping between delivery states and Slack messages
+- **Batch Processing**: Processes multiple delivery states efficiently
+
+See the notebook for detailed examples and documentation.
+
 ## API Endpoints (Streamable HTTP Transport)
 
 When using Streamable HTTP transport, the server exposes the following endpoints:

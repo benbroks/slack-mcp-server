@@ -1,0 +1,7 @@
+# Python dependencies for the refresh_account_recommendations.ipynb notebook
+
+slack-sdk>=3.27.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+jupyter>=1.0.0
+ipython>=8.12.0
