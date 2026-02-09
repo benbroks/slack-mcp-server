@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ds_example_001",
+    "account_name": "Example Corp",
+    "status": "active",
+    "updated_at": "2026-02-09T12:00:00Z",
+    "recommendations": [
+      {
+        "title": "Increase API Rate Limits",
+        "description": "Current usage is at 85% capacity"
+      },
+      {
+        "title": "Enable Multi-Factor Authentication",
+        "description": "Enhance security for admin accounts"
+      },
+      {
+        "title": "Upgrade to Premium Plan",
+        "description": "Unlock advanced analytics features"
+      }
+    ]
+  },
+  {
+    "id": "ds_example_002",
+    "account_name": "Demo Industries",
+    "status": "pending_approval",
+    "updated_at": "2026-02-09T11:30:00Z",
+    "recommendations": [
+      {
+        "title": "Implement Webhooks",
+        "description": "Real-time event notifications for critical updates"
+      },
+      {
+        "title": "Add Team Members",
+        "description": "Invite 3 additional users to collaborate"
+      }
+    ]
+  },
+  {
+    "id": "ds_example_003",
+    "account_name": "Test Solutions Ltd",
+    "status": "completed",
+    "updated_at": "2026-02-09T10:15:00Z",
+    "recommendations": [
+      {
+        "title": "Review Quarterly Report",
+        "description": "Q1 2026 performance metrics available"
+      }
+    ]
+  }
+]
