@@ -1,5 +1,5 @@
 {
-  "name": "@activelyai/slack-mcp-server",
+  "name": "@benbroks/slack-mcp-server",
   "version": "0.0.0-dev",
   "description": "MCP server for interacting with Slack",
   "license": "MIT",
