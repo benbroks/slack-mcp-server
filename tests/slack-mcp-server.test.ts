@@ -233,7 +233,7 @@ describe('SlackClient', () => {
     );
   });
 
-  test('getChannelHistory successful response', async () => {
+  test('getChannelHistory with default parameters (24 hours)', async () => {
     const mockResponse = {
       ok: true,
       messages: [
@@ -250,18 +250,118 @@ describe('SlackClient', () => {
       json: () => Promise.resolve(mockResponse),
     });
 
-    const result = await slackClient.getChannelHistory('C123456', 10);
+    const result = await slackClient.getChannelHistory('C123456');
 
     expect(result).toEqual(mockResponse);
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('https://slack.com/api/conversations.history'),
-      expect.objectContaining({
-        headers: {
-          Authorization: 'Bearer xoxb-test-token',
-          'Content-Type': 'application/json',
+    const fetchCall = mockFetch.mock.calls[0];
+    const url = new URL(fetchCall[0]);
+
+    expect(url.pathname).toBe('/api/conversations.history');
+    expect(url.searchParams.get('channel')).toBe('C123456');
+    expect(url.searchParams.get('limit')).toBe('200');
+    expect(url.searchParams.get('inclusive')).toBe('true');
+    expect(url.searchParams.get('oldest')).toBeTruthy(); // Should have a default value
+    expect(fetchCall[1]).toEqual(expect.objectContaining({
+      headers: {
+        Authorization: 'Bearer xoxb-test-token',
+        'Content-Type': 'application/json',
+      },
+    }));
+  });
+
+  test('getChannelHistory with Unix timestamp', async () => {
+    const mockResponse = {
+      ok: true,
+      messages: [
+        {
+          type: 'message',
+          user: 'U123456',
+          text: 'Hello',
+          ts: '1609459200.123456',
         },
-      })
-    );
+      ],
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      json: () => Promise.resolve(mockResponse),
+    });
+
+    const oldest = 1609459200; // Jan 1, 2021 00:00:00 UTC
+    const latest = 1609545600; // Jan 2, 2021 00:00:00 UTC
+    const result = await slackClient.getChannelHistory('C123456', oldest, latest);
+
+    expect(result).toEqual(mockResponse);
+    const fetchCall = mockFetch.mock.calls[0];
+    const url = new URL(fetchCall[0]);
+
+    expect(url.searchParams.get('oldest')).toBe('1609459200.000000');
+    expect(url.searchParams.get('latest')).toBe('1609545600.000000');
+    expect(url.searchParams.get('inclusive')).toBe('true');
+  });
+
+  test('getChannelHistory with ISO date string', async () => {
+    const mockResponse = {
+      ok: true,
+      messages: [],
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      json: () => Promise.resolve(mockResponse),
+    });
+
+    const oldest = '2021-01-01T00:00:00Z';
+    const latest = '2021-01-02T00:00:00Z';
+    const result = await slackClient.getChannelHistory('C123456', oldest, latest);
+
+    expect(result).toEqual(mockResponse);
+    const fetchCall = mockFetch.mock.calls[0];
+    const url = new URL(fetchCall[0]);
+
+    expect(url.searchParams.get('oldest')).toBe('1609459200.000000');
+    expect(url.searchParams.get('latest')).toBe('1609545600.000000');
+  });
+
+  test('getChannelHistory with Slack timestamp format', async () => {
+    const mockResponse = {
+      ok: true,
+      messages: [],
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      json: () => Promise.resolve(mockResponse),
+    });
+
+    const oldest = '1609459200.123456';
+    const latest = '1609545600.654321';
+    const result = await slackClient.getChannelHistory('C123456', oldest, latest);
+
+    expect(result).toEqual(mockResponse);
+    const fetchCall = mockFetch.mock.calls[0];
+    const url = new URL(fetchCall[0]);
+
+    expect(url.searchParams.get('oldest')).toBe('1609459200.123456');
+    expect(url.searchParams.get('latest')).toBe('1609545600.654321');
+  });
+
+  test('getChannelHistory with only oldest parameter', async () => {
+    const mockResponse = {
+      ok: true,
+      messages: [],
+    };
+
+    mockFetch.mockResolvedValueOnce({
+      json: () => Promise.resolve(mockResponse),
+    });
+
+    const oldest = 1609459200;
+    const result = await slackClient.getChannelHistory('C123456', oldest);
+
+    expect(result).toEqual(mockResponse);
+    const fetchCall = mockFetch.mock.calls[0];
+    const url = new URL(fetchCall[0]);
+
+    expect(url.searchParams.get('oldest')).toBe('1609459200.000000');
+    expect(url.searchParams.get('latest')).toBeNull(); // Should not set latest (defaults to now)
   });
 
   test('getThreadReplies successful response', async () => {
@@ -361,10 +461,25 @@ describe('SlackClient', () => {
   });
 });
 
+describe('toSlackTimestamp helper', () => {
+  test('converts ISO date string to Slack timestamp', async () => {
+    // We need to test this indirectly through getChannelHistory since it's not exported
+    // The tests above already cover this functionality
+  });
+
+  test('converts Unix timestamp number to Slack timestamp', async () => {
+    // Tested indirectly through getChannelHistory tests above
+  });
+
+  test('preserves Slack timestamp format', async () => {
+    // Tested indirectly through getChannelHistory tests above
+  });
+});
+
 describe('createSlackServer', () => {
   test('createSlackServer returns server instance', async () => {
     const { createSlackServer, SlackClient } = await import('../index.js');
-    
+
     const mockSlackClient = new SlackClient('xoxb-test-token');
     const server = createSlackServer(mockSlackClient);
 

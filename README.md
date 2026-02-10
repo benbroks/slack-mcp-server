@@ -39,12 +39,34 @@ A Model Context Protocol (MCP) server for interacting with Slack workspaces. Thi
    - Returns: Reaction confirmation
 
 5. **slack_get_channel_history**
-   - Get recent messages from a channel
+   - Get messages from a channel within a time range
+   - **Default behavior**: Retrieves last 24 hours of messages if no time range specified
+   - **Timestamp formats supported**: ISO date strings, Unix timestamps, or Slack timestamps
+   - **Messages matching exact timestamps are included** (inclusive behavior)
    - Required inputs:
      - `channel_id` (string): The channel ID
    - Optional inputs:
-     - `limit` (number, default: 10): Number of messages to retrieve
-   - Returns: List of messages with their content and metadata
+     - `oldest` (string | number): Start of time range. Accepts:
+       - ISO date string (e.g., `'2024-01-15T10:00:00Z'`)
+       - Unix timestamp (e.g., `1609459200`)
+       - Slack timestamp (e.g., `'1609459200.123456'`)
+       - Defaults to 24 hours ago if not provided
+     - `latest` (string | number): End of time range. Same formats as `oldest`. Defaults to now if not provided.
+   - Returns: List of messages (up to 200) within the time range with their content and metadata
+   - **Examples**:
+     ```javascript
+     // Get last 24 hours (default)
+     { channel_id: 'C123456' }
+
+     // Get specific time range with ISO dates
+     { channel_id: 'C123456', oldest: '2024-01-15T10:00:00Z', latest: '2024-01-15T18:00:00Z' }
+
+     // Get specific time range with Unix timestamps
+     { channel_id: 'C123456', oldest: 1609459200, latest: 1609545600 }
+
+     // Get everything since a specific time (latest defaults to now)
+     { channel_id: 'C123456', oldest: '2024-01-15T00:00:00Z' }
+     ```
 
 6. **slack_get_thread_replies**
    - Get all replies in a message thread

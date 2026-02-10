@@ -33,7 +33,8 @@ interface AddReactionArgs {
 
 interface GetChannelHistoryArgs {
   channel_id: string;
-  limit?: number;
+  oldest?: string | number;
+  latest?: string | number;
 }
 
 interface GetThreadRepliesArgs {
@@ -48,6 +49,28 @@ interface GetUsersArgs {
 
 interface GetUserProfileArgs {
   user_id: string;
+}
+
+// Helper function to convert ISO date string or Unix timestamp to Slack timestamp format
+function toSlackTimestamp(input: string | number): string {
+  if (typeof input === 'number') {
+    // Already a Unix timestamp in seconds
+    return input.toFixed(6);
+  }
+
+  // Check if it's already in Slack format (has decimal point)
+  if (typeof input === 'string' && input.includes('.')) {
+    return input;
+  }
+
+  // Try to parse as ISO date or other date format
+  const date = new Date(input);
+  if (isNaN(date.getTime())) {
+    throw new Error(`Invalid date format: ${input}. Expected ISO date string, Unix timestamp, or Slack timestamp.`);
+  }
+
+  // Convert to Unix timestamp with microsecond precision
+  return (date.getTime() / 1000).toFixed(6);
 }
 
 export class SlackClient {
@@ -162,15 +185,30 @@ export class SlackClient {
 
   async getChannelHistory(
     channel_id: string,
-    limit: number = 10,
+    oldest?: string | number,
+    latest?: string | number,
   ): Promise<any> {
-    const params = new URLSearchParams({
+    const params: Record<string, string> = {
       channel: channel_id,
-      limit: limit.toString(),
-    });
+      limit: "200", // Use max limit since we're filtering by time range
+      inclusive: "true", // Always include messages matching oldest/latest timestamps
+    };
+
+    // Default oldest to 24 hours ago if not provided
+    if (!oldest) {
+      const twentyFourHoursAgo = (Date.now() / 1000) - (24 * 60 * 60);
+      params.oldest = twentyFourHoursAgo.toFixed(6);
+    } else {
+      params.oldest = toSlackTimestamp(oldest);
+    }
+
+    // Default latest to now if not provided
+    if (latest) {
+      params.latest = toSlackTimestamp(latest);
+    }
 
     const response = await fetch(
-      `https://slack.com/api/conversations.history?${params}`,
+      `https://slack.com/api/conversations.history?${new URLSearchParams(params)}`,
       { headers: this.botHeaders },
     );
 
@@ -376,14 +414,15 @@ export function createSlackServer(slackClient: SlackClient): McpServer {
     "slack_get_channel_history",
     {
       title: "Get Slack Channel History",
-      description: "Get recent messages from a channel",
+      description: "Get messages from a channel within a time range. Defaults to last 24 hours if no time range specified. Accepts ISO date strings, Unix timestamps, or Slack timestamps. Messages matching the oldest/latest timestamps are included. NOTE: Requires a channel ID - use slack_search_channels first to find the channel ID by name.",
       inputSchema: {
-        channel_id: z.string().describe("The ID of the channel"),
-        limit: z.number().optional().default(10).describe("Number of messages to retrieve (default 10)"),
+        channel_id: z.string().describe("The ID of the channel (e.g., 'C1234567890'). Use slack_search_channels to find the channel ID from a channel name."),
+        oldest: z.union([z.string(), z.number()]).optional().describe("Start of time range. Accepts: ISO date string (e.g., '2024-01-15T10:00:00Z'), Unix timestamp in seconds (e.g., 1609459200), or Slack timestamp (e.g., '1609459200.123456'). For relative times, calculate from current time (e.g., for last 72 hours: Date.now()/1000 - 72*60*60). Defaults to 24 hours ago if not specified. Messages with this exact timestamp are included."),
+        latest: z.union([z.string(), z.number()]).optional().describe("End of time range (ISO date, Unix timestamp, or Slack timestamp). Defaults to now. Messages with this exact timestamp are included."),
       },
     },
-    async ({ channel_id, limit }) => {
-      const response = await slackClient.getChannelHistory(channel_id, limit);
+    async ({ channel_id, oldest, latest }) => {
+      const response = await slackClient.getChannelHistory(channel_id, oldest, latest);
       return {
         content: [{ type: "text", text: JSON.stringify(response) }],
       };
