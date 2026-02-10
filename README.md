@@ -1,6 +1,6 @@
 # slack-mcp-server
 ## Disclaimer
-This project includes [code](https://github.com/modelcontextprotocol/servers-archived/tree/main/src/slack) originally developed by Anthropic and released under the MIT License. Substantial modifications and new functionality have been added by For Good AI Inc. (dba Zencoder Inc.), and are licensed under the Apache License, Version 2.0. Actively is making its own adjustments!
+This project includes [code](https://github.com/modelcontextprotocol/servers-archived/tree/main/src/slack) originally developed by Anthropic and released under the MIT License. Substantial modifications and new functionality have been added by For Good AI Inc. (dba Zencoder Inc.), and are licensed under the Apache License, Version 2.0.
 
 ## Overview
 A Model Context Protocol (MCP) server for interacting with Slack workspaces. This server provides tools to search channels, post messages, reply to threads, add reactions, get channel history, and manage users.
@@ -157,7 +157,7 @@ npm run build
 
 ### Global Installation (NPM)
 ```bash
-npm install -g @activelyai/slack-mcp-server
+npm install -g @benbroks/slack-mcp-server
 ```
 
 ### Docker Installation
