@@ -190,31 +190,72 @@ export class SlackClient {
     oldest?: string | number,
     latest?: string | number,
   ): Promise<any> {
-    const params: Record<string, string> = {
-      channel: channel_id,
-      limit: "200", // Use max limit since we're filtering by time range
-      inclusive: "true", // Always include messages matching oldest/latest timestamps
-    };
+    // Resolve the client-side lower bound (defaults to 24 hours ago).
+    const oldestTs =
+      oldest != null && oldest !== ""
+        ? Number(toSlackTimestamp(oldest))
+        : (Date.now() / 1000) - (24 * 60 * 60);
+    const latestTs = latest != null && latest !== "" ? toSlackTimestamp(latest) : undefined;
 
-    // Default oldest to 24 hours ago if not provided
-    if (!oldest) {
-      const twentyFourHoursAgo = (Date.now() / 1000) - (24 * 60 * 60);
-      params.oldest = twentyFourHoursAgo.toFixed(6);
-    } else {
-      params.oldest = toSlackTimestamp(oldest);
+    // IMPORTANT: we intentionally do NOT send `oldest` to Slack. When `oldest`
+    // is set and a window holds more than one page of messages, Slack anchors
+    // at the oldest boundary and returns the OLDEST page first, silently
+    // dropping the newest messages. Instead we page newest-first from `latest`
+    // and stop once we cross `oldestTs`, so the most recent messages are always
+    // included and truncation is reported rather than hidden.
+    const MAX_PAGES = 10; // safety cap: up to ~2000 messages
+    const collected: any[] = [];
+    let cursor: string | undefined = undefined;
+    let truncated = false;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const params: Record<string, string> = {
+        channel: channel_id,
+        limit: "200",
+        inclusive: "true",
+      };
+      if (cursor) {
+        // Cursor pagination encodes position; don't also send latest.
+        params.cursor = cursor;
+      } else if (latestTs) {
+        params.latest = latestTs;
+      }
+
+      const response = await fetch(
+        `https://slack.com/api/conversations.history?${new URLSearchParams(params)}`,
+        { headers: this.botHeaders },
+      );
+      const data = await response.json();
+
+      // Propagate Slack API errors unchanged.
+      if (!data.ok) {
+        return data;
+      }
+
+      let crossedOldest = false;
+      for (const message of data.messages || []) {
+        if (Number(message.ts) >= oldestTs) {
+          collected.push(message);
+        } else {
+          crossedOldest = true;
+        }
+      }
+
+      cursor = data.response_metadata?.next_cursor || undefined;
+
+      if (crossedOldest || !cursor) {
+        break;
+      }
+      if (page === MAX_PAGES - 1) {
+        // Still more pages available but we've hit the safety cap.
+        truncated = true;
+      }
     }
 
-    // Default latest to now if not provided
-    if (latest) {
-      params.latest = toSlackTimestamp(latest);
-    }
+    // Each page is newest-first; normalize ordering across pages just in case.
+    collected.sort((a, b) => Number(b.ts) - Number(a.ts));
 
-    const response = await fetch(
-      `https://slack.com/api/conversations.history?${new URLSearchParams(params)}`,
-      { headers: this.botHeaders },
-    );
-
-    return response.json();
+    return { ok: true, messages: collected, truncated };
   }
 
   async getThreadReplies(channel_id: string, thread_ts: string): Promise<any> {
@@ -344,21 +385,21 @@ export class SlackClient {
       // Normalize name (lowercase, strip # prefix if present)
       const normalizedName = searchName.toLowerCase().replace(/^#/, "");
 
-      // Store by name (handle collisions by using array)
-      if (!this.channelCache.has(normalizedName)) {
-        this.channelCache.set(normalizedName, []);
-      }
-      this.channelCache.get(normalizedName)!.push(channel);
-
-      // For DMs, also index by the raw user id so lookups by id still resolve.
+      // Collect every key this conversation should be searchable under.
+      const keys = new Set<string>([normalizedName]);
+      // Its own channel/DM id (so channels and DMs resolve by C…/D… id).
+      keys.add(channel.id.toLowerCase());
+      // For DMs, also the other participant's raw user id.
       if (channel.is_im && channel.user) {
-        const idKey = channel.user.toLowerCase();
-        if (idKey !== normalizedName) {
-          if (!this.channelCache.has(idKey)) {
-            this.channelCache.set(idKey, []);
-          }
-          this.channelCache.get(idKey)!.push(channel);
+        keys.add(channel.user.toLowerCase());
+      }
+
+      // Store by name (handle collisions by using array)
+      for (const key of keys) {
+        if (!this.channelCache.has(key)) {
+          this.channelCache.set(key, []);
         }
+        this.channelCache.get(key)!.push(channel);
       }
 
       // Store by ID
@@ -408,7 +449,7 @@ export function createSlackServer(slackClient: SlackClient): McpServer {
     "slack_search_channels",
     {
       title: "Search Slack Channels",
-      description: "Search for channels and direct messages by name using the cached list. Covers public channels, private channels, group DMs, and 1:1 DMs (searchable by the other participant's name or user id). Supports partial, case-insensitive matching. Strips # prefix from query automatically.",
+      description: "Search for channels and direct messages using the cached list. Covers public channels, private channels, group DMs, and 1:1 DMs. Matches on name, on the conversation's own channel/DM id (C…/D…), and for DMs additionally on the participant's name and user id. Supports partial, case-insensitive matching. Strips # prefix from query automatically.",
       inputSchema: {
         query: z.string().describe("Channel name to search for (partial match, case-insensitive, # prefix optional)"),
       },
@@ -481,7 +522,7 @@ export function createSlackServer(slackClient: SlackClient): McpServer {
     "slack_get_channel_history",
     {
       title: "Get Slack Channel History",
-      description: "Get messages from a channel within a time range. Defaults to last 24 hours if no time range specified. Accepts ISO date strings, Unix timestamps, or Slack timestamps. Messages matching the oldest/latest timestamps are included. NOTE: Requires a channel ID - use slack_search_channels first to find the channel ID by name.",
+      description: "Get messages from a channel within a time range, returned newest-first. Defaults to the last 24 hours if no time range specified. Accepts ISO date strings, Unix timestamps, or Slack timestamps. The most recent messages are always included (the tool pages newest-first rather than truncating them). Returns { ok, messages, truncated }; truncated=true means the window held more than ~2000 messages and older ones were omitted. NOTE: Requires a channel ID - use slack_search_channels first to find the channel ID by name.",
       inputSchema: {
         channel_id: z.string().describe("The ID of the channel (e.g., 'C1234567890'). Use slack_search_channels to find the channel ID from a channel name."),
         oldest: z.union([z.string(), z.number()]).optional().describe("Start of time range. Accepts: ISO date string (e.g., '2024-01-15T10:00:00Z'), Unix timestamp in seconds (e.g., 1609459200), or Slack timestamp (e.g., '1609459200.123456'). For relative times, calculate from current time (e.g., for last 72 hours: Date.now()/1000 - 72*60*60). Defaults to 24 hours ago if not specified. Messages with this exact timestamp are included."),
