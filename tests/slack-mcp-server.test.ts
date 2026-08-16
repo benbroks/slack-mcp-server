@@ -132,6 +132,51 @@ describe('SlackClient', () => {
     );
   });
 
+  test('initializeChannelCache includes DMs and indexes them by participant name', async () => {
+    delete process.env.SLACK_CHANNEL_IDS;
+
+    // 1st fetch: conversations.list — a public channel plus a 1:1 DM (no name).
+    mockFetch.mockResolvedValueOnce({
+      json: () => Promise.resolve({
+        ok: true,
+        channels: [
+          { id: 'C123456', name: 'general', is_archived: false },
+          { id: 'D999999', is_im: true, user: 'U999' },
+        ],
+        response_metadata: { next_cursor: '' },
+      }),
+    });
+
+    // 2nd fetch: users.list — used to resolve the DM participant's name.
+    mockFetch.mockResolvedValueOnce({
+      json: () => Promise.resolve({
+        ok: true,
+        members: [
+          { id: 'U999', name: 'alice', profile: { display_name: 'Alice', real_name: 'Alice Smith' } },
+        ],
+        response_metadata: { next_cursor: '' },
+      }),
+    });
+
+    // Must not throw even though the DM channel has no `name` field.
+    await slackClient.initializeChannelCache();
+
+    // The DM is searchable by the other participant's display name...
+    const byName = slackClient.searchChannelsByName('alice');
+    expect(byName).toHaveLength(1);
+    expect(byName[0].id).toBe('D999999');
+
+    // ...and by the raw user id, without being returned twice.
+    const byId = slackClient.searchChannelsByName('U999');
+    expect(byId).toHaveLength(1);
+    expect(byId[0].id).toBe('D999999');
+
+    // Regular channels still resolve.
+    const channel = slackClient.searchChannelsByName('general');
+    expect(channel).toHaveLength(1);
+    expect(channel[0].id).toBe('C123456');
+  });
+
   test('postMessage successful response', async () => {
     const mockResponse = {
       ok: true,

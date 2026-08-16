@@ -90,7 +90,9 @@ export class SlackClient {
     const predefinedChannelIds = process.env.SLACK_CHANNEL_IDS;
     if (!predefinedChannelIds) {
       const params = new URLSearchParams({
-        types: "public_channel,private_channel",
+        // Include direct messages (im) and group DMs (mpim) so the sweep covers
+        // everything the token can read, not just public/private channels.
+        types: "public_channel,private_channel,im,mpim",
         exclude_archived: "true",
         limit: Math.min(limit, 200).toString(),
         team_id: process.env.SLACK_TEAM_ID!,
@@ -260,6 +262,38 @@ export class SlackClient {
     return response.json();
   }
 
+  // Best-effort map of user id -> display name, used to make DMs (which carry no
+  // channel name, only a user id) searchable by the other participant's name.
+  // Never throws: on failure it returns a partial/empty map so DM inclusion in
+  // the channel sweep can never break server startup.
+  private async buildUserNameMap(): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    try {
+      let cursor: string | undefined = undefined;
+      do {
+        const response = await this.getUsers(200, cursor);
+        if (!response.ok) {
+          console.error("Failed to fetch users for DM name resolution:", response.error);
+          break;
+        }
+        for (const user of response.members || []) {
+          const label =
+            user.profile?.display_name ||
+            user.profile?.real_name ||
+            user.real_name ||
+            user.name;
+          if (label) {
+            names.set(user.id, label);
+          }
+        }
+        cursor = response.response_metadata?.next_cursor;
+      } while (cursor);
+    } catch (err) {
+      console.error("Error building user name map for DMs:", err);
+    }
+    return names;
+  }
+
   // TODO: Add TTL-based cache refresh mechanism in the future
   async initializeChannelCache(): Promise<void> {
     if (this.cacheInitialized) {
@@ -290,16 +324,42 @@ export class SlackClient {
       cursor = response.response_metadata?.next_cursor;
     } while (cursor);
 
+    // Resolve user display names so DMs can be found by the other participant's
+    // name (best-effort; empty map if the lookup fails).
+    const userNames = await this.buildUserNameMap();
+
     // Populate both cache maps
     for (const channel of allChannels) {
-      // Normalize channel name (lowercase, strip # prefix if present)
-      const normalizedName = channel.name.toLowerCase().replace(/^#/, "");
+      // Derive a searchable name. Public/private channels and group DMs (mpim)
+      // have a `name`; direct messages (im) do not — they carry `user`/`is_im`.
+      let searchName: string;
+      if (channel.name) {
+        searchName = channel.name;
+      } else if (channel.is_im && channel.user) {
+        searchName = userNames.get(channel.user) || channel.user;
+      } else {
+        searchName = channel.id;
+      }
+
+      // Normalize name (lowercase, strip # prefix if present)
+      const normalizedName = searchName.toLowerCase().replace(/^#/, "");
 
       // Store by name (handle collisions by using array)
       if (!this.channelCache.has(normalizedName)) {
         this.channelCache.set(normalizedName, []);
       }
       this.channelCache.get(normalizedName)!.push(channel);
+
+      // For DMs, also index by the raw user id so lookups by id still resolve.
+      if (channel.is_im && channel.user) {
+        const idKey = channel.user.toLowerCase();
+        if (idKey !== normalizedName) {
+          if (!this.channelCache.has(idKey)) {
+            this.channelCache.set(idKey, []);
+          }
+          this.channelCache.get(idKey)!.push(channel);
+        }
+      }
 
       // Store by ID
       this.channelCacheById.set(channel.id, channel);
@@ -318,11 +378,18 @@ export class SlackClient {
     const normalizedQuery = query.toLowerCase().replace(/^#/, "");
 
     const results: any[] = [];
+    const seen = new Set<string>();
 
-    // Search through cache for partial matches
+    // Search through cache for partial matches. DMs are indexed under multiple
+    // keys (participant name + user id), so dedupe by channel id.
     for (const [name, channels] of this.channelCache.entries()) {
       if (name.includes(normalizedQuery)) {
-        results.push(...channels);
+        for (const channel of channels) {
+          if (!seen.has(channel.id)) {
+            seen.add(channel.id);
+            results.push(channel);
+          }
+        }
       }
     }
 
@@ -341,7 +408,7 @@ export function createSlackServer(slackClient: SlackClient): McpServer {
     "slack_search_channels",
     {
       title: "Search Slack Channels",
-      description: "Search for channels by name using the cached channel list. Supports partial, case-insensitive matching. Strips # prefix from query automatically.",
+      description: "Search for channels and direct messages by name using the cached list. Covers public channels, private channels, group DMs, and 1:1 DMs (searchable by the other participant's name or user id). Supports partial, case-insensitive matching. Strips # prefix from query automatically.",
       inputSchema: {
         query: z.string().describe("Channel name to search for (partial match, case-insensitive, # prefix optional)"),
       },
