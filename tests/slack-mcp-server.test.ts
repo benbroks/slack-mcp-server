@@ -132,7 +132,7 @@ describe('SlackClient', () => {
     );
   });
 
-  test('initializeChannelCache includes DMs and indexes them by participant name', async () => {
+  test('initializeChannelCache includes DMs and indexes by name, user id, and channel id', async () => {
     delete process.env.SLACK_CHANNEL_IDS;
 
     // 1st fetch: conversations.list — a public channel plus a 1:1 DM (no name).
@@ -166,15 +166,23 @@ describe('SlackClient', () => {
     expect(byName).toHaveLength(1);
     expect(byName[0].id).toBe('D999999');
 
-    // ...and by the raw user id, without being returned twice.
-    const byId = slackClient.searchChannelsByName('U999');
-    expect(byId).toHaveLength(1);
-    expect(byId[0].id).toBe('D999999');
+    // ...by the participant's user id...
+    const byUserId = slackClient.searchChannelsByName('U999');
+    expect(byUserId).toHaveLength(1);
+    expect(byUserId[0].id).toBe('D999999');
 
-    // Regular channels still resolve.
-    const channel = slackClient.searchChannelsByName('general');
-    expect(channel).toHaveLength(1);
-    expect(channel[0].id).toBe('C123456');
+    // ...and by its own DM (channel) id — each without duplicate hits.
+    const byDmId = slackClient.searchChannelsByName('D999999');
+    expect(byDmId).toHaveLength(1);
+    expect(byDmId[0].id).toBe('D999999');
+
+    // Regular channels resolve by name and by channel id.
+    const byChannelName = slackClient.searchChannelsByName('general');
+    expect(byChannelName).toHaveLength(1);
+    expect(byChannelName[0].id).toBe('C123456');
+    const byChannelId = slackClient.searchChannelsByName('C123456');
+    expect(byChannelId).toHaveLength(1);
+    expect(byChannelId[0].id).toBe('C123456');
   });
 
   test('postMessage successful response', async () => {

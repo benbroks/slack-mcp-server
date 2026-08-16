@@ -344,21 +344,21 @@ export class SlackClient {
       // Normalize name (lowercase, strip # prefix if present)
       const normalizedName = searchName.toLowerCase().replace(/^#/, "");
 
-      // Store by name (handle collisions by using array)
-      if (!this.channelCache.has(normalizedName)) {
-        this.channelCache.set(normalizedName, []);
-      }
-      this.channelCache.get(normalizedName)!.push(channel);
-
-      // For DMs, also index by the raw user id so lookups by id still resolve.
+      // Collect every key this conversation should be searchable under.
+      const keys = new Set<string>([normalizedName]);
+      // Its own channel/DM id (so channels and DMs resolve by C…/D… id).
+      keys.add(channel.id.toLowerCase());
+      // For DMs, also the other participant's raw user id.
       if (channel.is_im && channel.user) {
-        const idKey = channel.user.toLowerCase();
-        if (idKey !== normalizedName) {
-          if (!this.channelCache.has(idKey)) {
-            this.channelCache.set(idKey, []);
-          }
-          this.channelCache.get(idKey)!.push(channel);
+        keys.add(channel.user.toLowerCase());
+      }
+
+      // Store under each key (collisions handled by array; search dedupes by id).
+      for (const key of keys) {
+        if (!this.channelCache.has(key)) {
+          this.channelCache.set(key, []);
         }
+        this.channelCache.get(key)!.push(channel);
       }
 
       // Store by ID
@@ -408,7 +408,7 @@ export function createSlackServer(slackClient: SlackClient): McpServer {
     "slack_search_channels",
     {
       title: "Search Slack Channels",
-      description: "Search for channels and direct messages by name using the cached list. Covers public channels, private channels, group DMs, and 1:1 DMs (searchable by the other participant's name or user id). Supports partial, case-insensitive matching. Strips # prefix from query automatically.",
+      description: "Search for channels and direct messages using the cached list. Covers public channels, private channels, group DMs, and 1:1 DMs. Matches on name, on the conversation's own channel/DM id (C…/D…), and for DMs additionally on the participant's name and user id. Supports partial, case-insensitive matching. Strips # prefix from query automatically.",
       inputSchema: {
         query: z.string().describe("Channel name to search for (partial match, case-insensitive, # prefix optional)"),
       },
